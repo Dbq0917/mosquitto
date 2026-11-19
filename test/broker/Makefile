@@ -92,6 +92,7 @@ msg_sequence_test:
 	./04-retain-check-source.py
 	./04-retain-clear-multiple.py
 	./04-retain-qos0-repeated.py
+	./04-retain-reconnect-resend.py
 	./04-retain-upgrade-outgoing-qos.py
 
 05 :

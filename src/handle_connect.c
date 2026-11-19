@@ -88,6 +88,7 @@ int connect__on_authorised(struct mosquitto *context, void *auth_data_out, uint1
 	struct mosquitto__subleaf *leaf;
 	mosquitto_property *connack_props = NULL;
 	uint8_t connect_ack = 0;
+	bool session_reclaimed = false;
 	int rc;
 	int in_quota, out_quota;
 	uint16_t in_maximum, out_maximum;
@@ -116,6 +117,7 @@ int connect__on_authorised(struct mosquitto *context, void *auth_data_out, uint1
 			if(context->protocol == mosq_p_mqtt311 || context->protocol == mosq_p_mqtt5){
 				connect_ack |= 0x01;
 			}
+			session_reclaimed = true;
 
 			if(found_context->msgs_in.inflight || found_context->msgs_in.queued
 					|| found_context->msgs_out.inflight || found_context->msgs_out.queued){
@@ -306,6 +308,29 @@ int connect__on_authorised(struct mosquitto *context, void *auth_data_out, uint1
 	mosquitto_property_free_all(&connack_props);
 	if(rc){
 		return rc;
+	}
+	if(session_reclaimed){
+		/* The client has reclaimed its session, including subscriptions,
+		 * without resubscribing. Resend the retained messages that match
+		 * those subscriptions so the client gets the current state.
+		 * Only the single retained message per topic is sent, and outgoing
+		 * queue limits (max_queued_messages/max_queued_bytes) still apply,
+		 * so a large retained tree can't exhaust memory. */
+		for(int i=0; i<context->subs_capacity; i++){
+			if(context->subs[i]){
+				struct mosquitto_subscription sub;
+
+				memset(&sub, 0, sizeof(struct mosquitto_subscription));
+				sub.clientid = context->id;
+				sub.topic_filter = context->subs[i]->topic_filter;
+				sub.identifier = context->subs[i]->identifier;
+				sub.options = context->subs[i]->subscription_options;
+
+				if(retain__queue(context, &sub)){
+					return MOSQ_ERR_NOMEM;
+				}
+			}
+		}
 	}
 	db__expire_all_messages(context);
 	rc = db__message_write_queued_out(context);
